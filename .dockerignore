@@ -1,0 +1,153 @@
+# Data files
+data/
+sample_chapter_vod_data/
+temp_audio/
+temp_clips/
+*.mp4
+*.wav
+*.json
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+
+# Test files
+test-scripts/
+test-files/
+test_results/
+clip_creation/test_screens/
+docs/
+sample_chapter_vod_data/
+temp_downloads/
+runs/
+ps1-scripts/
+tools/
+
+# Executables (keeping essential ones for cloud workflow)
+executables/
+# *.exe
+# ffmpeg.exe
+# ffprobe.exe
+# TwitchDownloaderCLI.exe
+
+# Large files
+THIRD-PARTY-LICENSES.txt
+COPYRIGHT.txt
+
+# Logs
+logs/
+*.log
+
+# Cache and temporary files
+cache_manager.py
+temp_*/
+
+# Legacy directories
+rag_old/
+
+# Environment and configuration files
+config/
+*.env
+.env
+*.env.local
+*.env.production
+*.env.development
+
+# PowerShell scripts (Windows-specific)
+*.ps1
+setup_env.ps1
+setup_gpu_orchestrator.ps1
+run_deployment_workflow.ps1
+set_utf8_env.ps1
+trigger_watcher_vod.ps1
+setup_gpu_orchestrator.ps1
+
+# Batch scripts (Windows-specific)
+*.bat
+setup_env.bat
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.flv
+*.webm
+
+# Audio files
+*.wav
+*.mp3
+*.aac
+*.flac
+*.ogg
+*.m4a
+
+# Archive files
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Index files
+*.index
+*.meta.sqlite
+
+# Model files
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.joblib
+
+# Credentials and secrets
+*credentials*.json
+*secrets*.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary and cache directories
+.cache/
+.tmp/
+temp/
+tmp/
