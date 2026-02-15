@@ -33,6 +33,7 @@ google-genai>=1.0.0  # New unified Gemini SDK
 google-cloud-aiplatform>=1.35.0
 openai-whisper>=20231117
 faster-whisper>=1.0.0
+mediapipe>=0.10.0
 
 # YouTube API dependencies
 google-auth>=2.0.0
@@ -49,4 +50,4 @@ opencv-python<4.12,>=4.8.0
 ultralytics>=8.2.0,<9
 
 # Phase 3: Container Modularity
-# (click and python-dotenv already included above) 
+# (click and python-dotenv already included above)
