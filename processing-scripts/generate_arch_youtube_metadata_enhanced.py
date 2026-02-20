@@ -24,7 +24,7 @@ import importlib.util
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # AI clients - use centralized service
-from src.ai_client import call_llm, _call_ollama_json
+from src.ai_client import call_llm
 
 # Import centralized title service
 try:
@@ -94,273 +94,7 @@ def _load_enhanced_director_cut_manifest(vod_id: str) -> Optional[Dict]:
     return None
 
 
-def _call_ollama(prompt: str, model: str = "llama3.1:8b") -> Optional[str]:
-    """Call Ollama API to generate content."""
-    try:
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_tokens": 1000
-            }
-        }
-        
-        response = requests.post(url, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result.get("response", "").strip()
-    except Exception as e:
-        print(f"Ollama API call failed: {e}")
-        return None
-
-
-def _collect_and_smooth_arc_ranges(enhanced_manifest: Dict, arc_start_abs: int, arc_end_abs: int) -> List[Dict]:
-    """Collect ranges that overlap the arc, convert to arc-relative, then smooth overlaps.
-    
-    Filters to significant ranges only and merges adjacent ranges to avoid timestamp spam.
-    Target: 8-15 meaningful chapter markers for typical arc.
-
-    Returns list of dicts with keys: start (int seconds, relative), end (int seconds, relative), summary (str), topic_key, energy.
-    """
-    raw: List[Dict] = []
-    for range_data in enhanced_manifest.get("ranges", []):
-        try:
-            range_start = int(float(range_data.get("start", 0)))
-            range_end = int(float(range_data.get("end", 0)))
-        except Exception:
-            continue
-        if range_start < arc_end_abs and range_end > arc_start_abs:
-            # Clamp to arc window and convert to relative seconds
-            adj_start = max(0, range_start - arc_start_abs)
-            adj_end = max(0, min(arc_end_abs, range_end) - arc_start_abs)
-            duration = adj_end - adj_start
-            
-            # Filter out very short ranges (less than 30 seconds)
-            if duration < 30:
-                continue
-                
-            raw.append({
-                "start": adj_start,
-                "end": adj_end,
-                "duration": duration,
-                "summary": str(range_data.get("summary") or "").strip(),
-                "topic_key": str(range_data.get("topic_key") or "").strip(),
-                "energy": str(range_data.get("energy") or "").strip(),
-            })
-
-    if not raw:
-        return []
-
-    # Sort by start
-    raw.sort(key=lambda r: r["start"])
-
-    # Merge adjacent ranges that are very close (within 60 seconds)
-    # and have similar topics to reduce timestamp clutter
-    # BUT: Be less aggressive for short arcs to ensure minimum timestamp count
-    target_max = 15
-    
-    merged: List[Dict] = []
-    current = raw[0]
-    
-    for r in raw[1:]:
-        gap = r["start"] - current["end"]
-        same_topic = r["topic_key"] == current["topic_key"]
-        
-        # Adaptive merging: only merge if we have way too many ranges
-        # For short arcs, be very conservative with merging
-        ranges_so_far = len(merged) + 1
-        remaining_ranges = len(raw) - raw.index(r)
-        estimated_total = ranges_so_far + remaining_ranges
-        
-        # Only merge if we'd end up with too many timestamps
-        should_merge = False
-        if estimated_total > target_max:
-            # Merge if gap is very small and same topic
-            should_merge = (gap < 45 and same_topic) or (gap < 20)
-        
-        if should_merge:
-            # Extend current range
-            current["end"] = r["end"]
-            current["duration"] = current["end"] - current["start"]
-            # Combine summaries
-            if r["summary"] and r["summary"] not in current["summary"]:
-                current["summary"] = f"{current['summary']}; {r['summary']}"
-        else:
-            merged.append(current)
-            current = r
-    
-    # Don't forget the last one
-    merged.append(current)
-
-    # If still too many ranges, keep only the most significant ones
-    # Prefer longer durations and higher energy
-    if len(merged) > 20:
-        # Score by duration and energy
-        for r in merged:
-            energy_score = 1.5 if r.get("energy") == "high" else (1.0 if r.get("energy") == "medium" else 0.5)
-            r["score"] = r["duration"] * energy_score
-        
-        # Sort by score descending, keep top 15
-        merged.sort(key=lambda r: r.get("score", 0), reverse=True)
-        merged = merged[:15]
-        
-        # Re-sort by start time
-        merged.sort(key=lambda r: r["start"])
-
-    # Final smoothing: enforce non-decreasing starts
-    smoothed: List[Dict] = []
-    last_end = 0
-    for r in merged:
-        start = max(r["start"], last_end)
-        end = max(start + 30, r["end"])  # ensure minimum duration 30s
-        smoothed.append({
-            "start": start,
-            "end": end,
-            "summary": r["summary"],
-            "topic_key": r["topic_key"],
-            "energy": r["energy"],
-        })
-        last_end = end
-    
-    return smoothed
-
-
-def _generate_labels_with_ollama(arc_ranges: List[Dict]) -> Optional[List[str]]:
-    """
-    Ask Ollama for labels with strict JSON schema (exact count).
-    """
-    if not arc_ranges:
-        return []
-
-    # Build a small, deterministic prompt with clear examples
-    items = [
-        f"- {r['summary']} (topic: {r['topic_key']}, energy: {r['energy']})"
-        for r in arc_ranges[:50]
-    ]
-    
-    # Much more explicit prompt with examples - STRICT about weak verbs
-    prompt = (
-        "You create YouTube video chapter titles for stream highlights.\n\n"
-        "CRITICAL RULES - You MUST follow ALL of these:\n"
-        "1. Each label is 4-8 words maximum\n"
-        "2. Use title case (capitalize first letter of each major word)\n"
-        "3. NO periods, commas, or any punctuation at the end\n"
-        "4. Be specific and descriptive, not vague\n"
-        "5. Use STRONG action verbs: Explaining, Building, Fighting, Defeating, Planning, Strategizing\n"
-        "6. BANNED WEAK VERBS - NEVER USE: Discussing, Talking, Sharing, Enjoying, Mentioning, Describing, Reflecting\n"
-        "7. NO pronouns (he, she, they, user, streamer, player)\n"
-        "8. NO generic phrases like 'Something Interesting'\n\n"
-        "GOOD EXAMPLES:\n"
-        "- Explaining Career Choice to Family\n"
-        "- Building Minecraft Castle in Snow\n"
-        "- Reacting to Banff Travel Recommendations\n"
-        "- Fighting Cerberus Boss Battle\n"
-        "- Planning Korean Food Restaurant Visit\n"
-        "- Strategizing Healer Positioning for Raid\n\n"
-        "BAD EXAMPLES (NEVER DO THIS):\n"
-        "- Discussing career choices (uses 'discussing')\n"
-        "- Talking about skincare routine (uses 'talking about')\n"
-        "- Sharing personal anxiety (uses 'sharing')\n"
-        "- Enjoying New York food (uses 'enjoying')\n"
-        "- Players notice something interesting (has 'players', too vague)\n"
-        "- Reflecting on gaming skills (uses 'reflecting')\n\n"
-        "BETTER VERSIONS:\n"
-        "- Explaining Career Choice to Parents\n"
-        "- Showing Skincare Routine Steps\n"
-        "- Revealing Streaming Anxiety Struggles\n"
-        "- Rating Best New York Restaurants\n"
-        "- Discovering Hidden Game Mechanic\n"
-        "- Analyzing Personal Gaming Performance\n\n"
-        "For each bullet below, write ONE short chapter title using STRONG verbs only.\n"
-        "Return ONLY valid JSON matching the schema, no extra text.\n\n"
-        "Segments to label:\n" + "\n".join(items)
-    )
-
-    count = len(items)
-    schema = {
-        "type": "object",
-        "properties": {
-            "labels": {
-                "type": "array",
-                "items": { "type": "string", "minLength": 10, "maxLength": 100 },
-                "minItems": count,
-                "maxItems": count
-            }
-        },
-        "required": ["labels"],
-        "additionalProperties": False
-    }
-
-    obj = _call_ollama_json(
-        prompt=prompt,
-        schema=schema,
-        model=os.getenv("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct"),
-        num_ctx=int(os.getenv("LOCAL_NUM_CTX", "16384")),
-        num_predict=512,  # Increased from 256 to allow more output
-        temperature=0.3,  # Lower temperature for more consistency
-        top_p=0.9,
-        top_k=40,  # Reduced for more focused outputs
-        repeat_penalty=1.2  # Increased to avoid repetition
-    )
-    if not obj or not isinstance(obj.get("labels"), list):
-        return None
-
-    # Clean up labels - remove any trailing punctuation and fix weak verbs
-    cleaned = []
-    
-    # Mapping of weak verbs to stronger alternatives
-    weak_verb_fixes = {
-        r'^Discussing\s+': 'Explaining ',
-        r'^Talking About\s+': 'Explaining ',
-        r'^Talks About\s+': 'Explaining ',
-        r'^Sharing\s+': 'Revealing ',
-        r'^Enjoying\s+': 'Experiencing ',
-        r'^Mentioning\s+': 'Highlighting ',
-        r'^Describing\s+': 'Explaining ',
-        r'^Reflecting On\s+': 'Analyzing ',
-        r'^Reflecting\s+': 'Analyzing ',
-        r'\bPlayer\s+': '',
-        r'\bPlayers\s+': '',
-        r'\bStreamer\s+': '',
-        r'\bUser\s+': '',
-        r'\bSomething Interesting\b': 'Hidden Details',
-        r'\bSomething\s+': '',
-    }
-    
-    for s in obj["labels"]:
-        t = str(s or "").strip().strip('"').replace("\n", " ")
-        # Remove trailing punctuation
-        t = re.sub(r'[.,;:!?]+$', '', t).strip()
-        
-        # Fix weak verbs with post-processing
-        for pattern, replacement in weak_verb_fixes.items():
-            t = re.sub(pattern, replacement, t, flags=re.IGNORECASE)
-        
-        # Clean up double spaces and re-capitalize
-        t = re.sub(r'\s+', ' ', t).strip()
-        
-        # Re-apply title case after fixes
-        if t:
-            words = t.split()
-            # Capitalize first letter of each word except small words (unless first word)
-            small_words = {'a', 'an', 'and', 'at', 'but', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with'}
-            title_words = []
-            for i, word in enumerate(words):
-                if i == 0 or word.lower() not in small_words:
-                    title_words.append(word.capitalize())
-                else:
-                    title_words.append(word.lower())
-            t = ' '.join(title_words)
-            cleaned.append(t)
-    
-    return cleaned or None
-
-def _generate_timestamps_with_ollama(vod_id: str, arc_manifest: Dict) -> Optional[str]:
+def _generate_timestamps(vod_id: str, arc_manifest: Dict) -> Optional[str]:
     """Generate timestamp lines using Gemini 3 Flash via centralized TitleService.
 
     The returned string contains lines of the form: HH:MM:SS label
@@ -386,8 +120,12 @@ def _generate_timestamps_with_ollama(vod_id: str, arc_manifest: Dict) -> Optiona
         for segment_name in ["intro", "climax", "resolution"]:
             segment = arc_manifest.get(segment_name)
             if segment and isinstance(segment, dict):
-                seg_start = int(segment.get("start", 0))
-                seg_end = int(segment.get("end", 0))
+                try:
+                    seg_start = int(float(segment.get("start") or 0))
+                    seg_end = int(float(segment.get("end") or 0))
+                except (ValueError, TypeError):
+                    continue
+
                 if seg_start >= arc_start_abs and seg_end <= arc_end_abs and seg_end > seg_start:
                     # Convert to relative time
                     rel_start = seg_start - arc_start_abs
@@ -436,11 +174,8 @@ def _generate_timestamps_with_ollama(vod_id: str, arc_manifest: Dict) -> Optiona
         except Exception as e:
             print(f"⚠️ TitleService timestamps failed, using legacy: {e}")
 
-    # Legacy fallback: use Ollama
-    labels = _generate_labels_with_ollama(arc_ranges)
-    if not labels:
-        # Fallback: condense summaries
-        labels = [ _condense(r.get("summary", ""), 60) or "Highlights" for r in arc_ranges ]
+    # Fallback: condense summaries
+    labels = [ _condense(r.get("summary", ""), 60) or "Highlights" for r in arc_ranges ]
 
     # Pair our computed starts with labels; keep counts aligned
     count = min(len(arc_ranges), len(labels))
@@ -668,14 +403,16 @@ def _build_arc_title_prompt(vod_id: str, arc_idx: int, man: Dict) -> str:
     title_rules = (
         "\n\nTITLE RULES — enforce all:\n"
         "- Be as specific as possible, what is the content of the clip? Who is involved? What is the main event? What is the outcome? What title would make it viral?\n"
-        "- Maximum 40 characters (including spaces)\n"
+        "- Maximum 80 characters (including spaces)\n"
         "- No emojis or special characters\n"
         "- No quotes or punctuation marks\n"
         "- Do not use the words 'streamer'\n"
         "- Use simple, clear language; focus on the main event; be a little clickbaitish\n"
         "- Be as specific as possible\n"
         "- Name the streamer at the start of the title if possible\n"
-        "Bad examples: INSANE GOAL!!!; EPIC MOMENT!!!; Streamer reacts; Clutch play to save a teammate\n"
+        "- IF GAMEPLAY: Mention the specific game, opponent, or key champion/strategy if relevant (e.g. 'Game 3 vs Sentinels', 'The 700 Stack Nasus').\n"
+        "- IF REACTION: Mention WHAT is being watched/reacted to (e.g. 'Reacting to X', 'Watching Y').\n"
+        "Bad examples: INSANE GOAL!!!; EPIC MOMENT!!!; Streamer reacts; Clutch play to save a teammate; The Civil War continues\n"
     )
 
     parts: List[str] = [
@@ -981,9 +718,9 @@ def main() -> None:
                 except Exception:
                     pass
 
-            # Generate timestamps using Ollama
+            # Generate timestamps
             print(f"Generating timestamps for arc {arc_idx}")
-            timestamps = _generate_timestamps_with_ollama(vod_id, man)
+            timestamps = _generate_timestamps(vod_id, man)
 
             # Generate thumbnail text
             print(f"Generating thumbnail text for arc {arc_idx}")

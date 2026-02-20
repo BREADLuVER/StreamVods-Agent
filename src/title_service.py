@@ -45,7 +45,7 @@ except ImportError:
 
 # Title length limits (consistent across all types)
 CLIP_TITLE_MAX_CHARS = 50  # Short clips/shorts
-ARC_TITLE_MAX_CHARS = 60   # Arc/video titles
+ARC_TITLE_MAX_CHARS = 100   # Arc/video titles
 VIDEO_TITLE_MAX_CHARS = 80  # Full video titles
 
 # Sample human-written titles for style reference (best examples from existing prompts)
@@ -216,20 +216,27 @@ CONTENT SUMMARY:
 {summary}
 
 RULES:
-- Focus on the story or event.
-- Write it like a story arc, not a summary.
+- Focus on the SPECIFIC story, event, or game match.
+- IF GAMEPLAY: Mention the specific game, opponent, or key champion/strategy if relevant (e.g. "Game 3 vs Sentinels", "The 700 Stack Nasus").
+- IF REACTION: Mention WHAT is being watched/reacted to (e.g. "Reacting to X", "Watching Y").
+- Write it like a story arc, but include identifying details.
 - Use "power words" that feel human, not like an AI blog.
 - Max {max_chars} characters.
 
-BAD EXAMPLES (Librarian Style):
+BAD EXAMPLES (Too Vague/Generic):
+- The most intense match ever
+- {streamer} reacts to a video
+- The Civil War continues
+- Chaos in the tournament
 - Masayoshi's chaotic Club Penguin adventure
-- Learning to play Card Jitsu
 
-GOOD EXAMPLES (Editor Style):
+GOOD EXAMPLES (Specific & Clickable):
+- {streamer} vs Sentinels: The 700 Stack Nasus Incident
+- The Moment DSG Lost Game 5 vs Sentinels
+- {streamer} Reacts to "The Fall of 100 Thieves"
+- How {streamer} accidentally leaked the roster
+- We built a cult in Lethal Company (Modded)
 - {streamer} tried to become a club penguin god
-- the most intense game of card jitsu ever played
-- how {streamer} lost everything in club penguin
-- we accidentally started a cult
 
 Return ONLY the title."""
 

@@ -78,8 +78,18 @@ def upload_arc_with_error_tracking(
                 # Try to attach thumbnail
                 try:
                     thumb_dir = Path(f"data/thumbnails/{vod_id}/arch")
+                    
+                    # Prefer Gemini refined thumbnail if available
+                    gemini_pref = thumb_dir / f"arc_{arc_idx:03d}_v1_gemini.jpg"
                     pref = thumb_dir / f"arc_{arc_idx:03d}_v1.jpg"
-                    thumb_path = pref if pref.exists() else (next(iter(sorted(thumb_dir.glob(f"arc_{arc_idx:03d}_v*.jpg"))), None))
+                    
+                    if gemini_pref.exists():
+                        thumb_path = gemini_pref
+                    elif pref.exists():
+                        thumb_path = pref
+                    else:
+                        thumb_path = next(iter(sorted(thumb_dir.glob(f"arc_{arc_idx:03d}_v*.jpg"))), None)
+
                     if thumb_path and isinstance(thumb_path, Path) and thumb_path.exists():
                         _ = up.set_thumbnail(vid, str(thumb_path))
                 except Exception:

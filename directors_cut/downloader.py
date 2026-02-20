@@ -85,6 +85,11 @@ def _download_one(vod_id: str, plan: SegmentPlan, quality_prefs: List[str]) -> b
     except Exception:
         pass
 
+    # Ensure ffmpeg is in PATH for TwitchDownloaderCLI
+    if os.name == 'nt':
+        exec_dir = str(Path(__file__).parent.parent / "executables")
+        env["PATH"] = f"{exec_dir}{os.pathsep}{env.get('PATH', '')}"
+
     for q in ladder:
         base_cmd = [
             twitch_cli, "videodownload",
@@ -102,6 +107,9 @@ def _download_one(vod_id: str, plan: SegmentPlan, quality_prefs: List[str]) -> b
                 return False
             if res.returncode == 0 and plan.out_path.exists() and plan.out_path.stat().st_size > 0:
                 return True
+            # Log failure details for debugging
+            last_err = (res.stderr or res.stdout or "").strip()[:200]
+            print(f"⚠️ Download attempt {attempt} failed: {last_err}")
     return False
 
 
@@ -124,8 +132,19 @@ def download_segments(plans: List[SegmentPlan], vod_id: str, max_workers: Option
         quality_prefs = [quality] if quality else ["1080p"]
 
     out_paths: List[Path] = [p.out_path for p in plans]
-    # Skip downloads for existing non-empty files
-    todo: List[SegmentPlan] = [p for p in plans if not (p.out_path.exists() and p.out_path.stat().st_size > 0)]
+    # Skip downloads for existing non-empty files (must be > 1KB to be valid)
+    todo: List[SegmentPlan] = []
+    for p in plans:
+        if p.out_path.exists():
+            if p.out_path.stat().st_size > 1024:
+                continue
+            # Delete 0-byte or tiny corrupt files so we retry them
+            try:
+                p.out_path.unlink()
+            except Exception:
+                pass
+        todo.append(p)
+
     if not todo:
         return out_paths
 
@@ -138,18 +157,16 @@ def download_segments(plans: List[SegmentPlan], vod_id: str, max_workers: Option
             try:
                 ok = fut.result()
                 if not ok:
-                    # leave a marker file for failure to avoid infinite retries
+                    # Don't leave marker files; let next run retry
                     try:
-                        plan.out_path.write_text("", encoding="utf-8")
+                        if plan.out_path.exists() and plan.out_path.stat().st_size == 0:
+                            plan.out_path.unlink()
                     except Exception:
                         pass
             except Exception:
-                try:
-                    plan.out_path.write_text("", encoding="utf-8")
-                except Exception:
-                    pass
+                pass
 
     # Return list in original order
-    return [p.out_path for p in plans if p.out_path.exists() and p.out_path.stat().st_size >= 0]
+    return [p.out_path for p in plans if p.out_path.exists() and p.out_path.stat().st_size > 1024]
 
 

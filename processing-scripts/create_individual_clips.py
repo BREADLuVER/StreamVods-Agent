@@ -744,7 +744,8 @@ def convert_to_shorts_format(input_path: Path, output_path: Path, vod_id: Option
             ff_fthreads = os.getenv("FFMPEG_FILTER_THREADS", "1")
             ff_cfthreads = os.getenv("FFMPEG_FILTER_COMPLEX_THREADS", "1")
             ff_tq = os.getenv("FFMPEG_THREAD_QUEUE_SIZE", "1024")
-            nvenc_cmd = [ffmpeg_bin, "-y", "-threads", ff_threads, "-filter_threads", ff_fthreads, "-filter_complex_threads", ff_cfthreads, "-thread_queue_size", ff_tq, "-i", str(input_path)]
+            # Add -ss 0.001 to force seek/reset timestamps at start
+            nvenc_cmd = [ffmpeg_bin, "-y", "-threads", ff_threads, "-filter_threads", ff_fthreads, "-filter_complex_threads", ff_cfthreads, "-thread_queue_size", ff_tq, "-ss", "0.001", "-i", str(input_path)]
             if 'external_chat_inputs' in locals():
                 for _eci in external_chat_inputs:
                     nvenc_cmd += ["-thread_queue_size", ff_tq, "-i", _eci]
@@ -768,6 +769,8 @@ def convert_to_shorts_format(input_path: Path, output_path: Path, vod_id: Option
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-b:a", "128k",
+                "-af", "aresample=async=1:first_pts=0",
+                "-fps_mode", "cfr",
                 "-movflags", "+faststart",
                 str(output_path)
             ]
@@ -790,7 +793,8 @@ def convert_to_shorts_format(input_path: Path, output_path: Path, vod_id: Option
         ff_fthreads = os.getenv("FFMPEG_FILTER_THREADS", "1")
         ff_cfthreads = os.getenv("FFMPEG_FILTER_COMPLEX_THREADS", "1")
         ff_tq = os.getenv("FFMPEG_THREAD_QUEUE_SIZE", "1024")
-        cpu_cmd = [ffmpeg_bin, "-y", "-threads", ff_threads, "-filter_threads", ff_fthreads, "-filter_complex_threads", ff_cfthreads, "-thread_queue_size", ff_tq, "-i", str(input_path)]
+        # Add -ss 0.001 to force seek/reset timestamps at start
+        cpu_cmd = [ffmpeg_bin, "-y", "-threads", ff_threads, "-filter_threads", ff_fthreads, "-filter_complex_threads", ff_cfthreads, "-thread_queue_size", ff_tq, "-ss", "0.001", "-i", str(input_path)]
         if 'external_chat_inputs' in locals():
             for _eci in external_chat_inputs:
                 cpu_cmd += ["-thread_queue_size", ff_tq, "-i", _eci]
@@ -806,6 +810,8 @@ def convert_to_shorts_format(input_path: Path, output_path: Path, vod_id: Option
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "128k",
+            "-af", "aresample=async=1:first_pts=0",
+            "-fps_mode", "cfr",
             "-movflags", "+faststart",
             str(output_path)
         ]

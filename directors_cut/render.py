@@ -19,13 +19,20 @@ from .ffmpeg_graph import build_xfade_command, run_ffmpeg, run_ffmpeg_streaming
 
 
 def _concat_copy(inputs: List[Path], output: Path, timeout: int | None = None) -> bool:
+    # Optimization: if only one input file, we used to direct copy, but that preserves
+    # potential start-lag from the source. We now fall through to ffmpeg to fix timestamps.
+    # if len(inputs) == 1: ... (removed)
+
     try:
         ffmpeg = 'executables/ffmpeg.exe' if os.name == 'nt' and Path('executables/ffmpeg.exe').exists() else 'ffmpeg'
         concat_list = output.parent / 'concat_list.txt'
         with concat_list.open('w', encoding='utf-8') as f:
             for p in inputs:
                 f.write(f"file '{p.absolute()}'\n")
-        cmd = [ffmpeg, '-f', 'concat', '-safe', '0', '-fflags', '+genpts', '-i', str(concat_list), '-c', 'copy', '-movflags', '+faststart', '-y', str(output)]
+        # Add -ignore_unknown to prevent issues with extra data streams
+        # Add -avoid_negative_ts make_zero to fix initial timestamp issues
+        # Add -ss 0 before input to help align start
+        cmd = [ffmpeg, '-ss', '0', '-f', 'concat', '-safe', '0', '-fflags', '+genpts', '-i', str(concat_list), '-c', 'copy', '-ignore_unknown', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', str(output)]
         ok, _, _ = run_ffmpeg(cmd, timeout=timeout if (timeout is not None and timeout > 0) else None)
         try:
             concat_list.unlink()

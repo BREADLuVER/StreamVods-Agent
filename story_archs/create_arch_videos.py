@@ -116,8 +116,11 @@ def _concat_best(paths: List[Path], output: Path, timeout: Optional[int] = None)
         from directors_cut.render import _concat_copy as _cc, _concat_encode as _ce  # type: ignore
     except Exception:
         return _concat_copy(paths, output, timeout=timeout)
+    
+    # Try stream copy first (fastest, lossless, best for sync if single file)
     if _cc(paths, output, timeout=timeout):
         return True
+    
     # NVENC fallback first, then CPU
     if _ce(paths, output, use_nvenc=True, timeout=timeout):
         return True
@@ -131,12 +134,15 @@ def _download_segments_for_ranges(vod_id: str, ranges: List[Dict[str, Any]], qua
         print(f"X downloader unavailable: {e}")
         return []
     # Allow concurrent multi-part downloads for speed; configurable via env
+    # DEFAULT CHANGED: 300 -> 14400 (4 hours) to prevent audio desync from stitching small chunks
+    # We prefer single continuous downloads for arcs to maintain sync.
     seg_cap = 0
     try:
-        seg_cap = int(os.getenv('ARC_DL_SEG_SEC', '300'))
+        seg_cap = int(os.getenv('ARC_DL_SEG_SEC', '14400'))
     except Exception:
-        seg_cap = 300
-    seg_cap = max(30, min(10_000, seg_cap))
+        seg_cap = 14400
+    # Cap at 12 hours just in case
+    seg_cap = max(30, min(43200, seg_cap))
     segments = plan_segments_from_ranges(ranges, vod_id, max_segment_seconds=int(seg_cap))
     paths = download_segments(segments, vod_id, quality=quality, max_workers=max_workers)
     return [p for p in paths if p and p.exists() and p.stat().st_size > 0]
